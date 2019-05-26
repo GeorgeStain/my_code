@@ -1,0 +1,46 @@
+from loop import Looper
+import datetime as dt
+
+
+def read_query(file) ->str:
+    with open(file, "r") as f:
+        query = f.read()
+    return query
+
+
+def replace_all(query: str) -> str:
+    params = {'$START_TIME': '{START_TIME}' , '$STOP_TIME' : '{STOP_TIME}' }
+    adj = {'{': '{{', '}': '}}'}
+    qq = query
+    for i, j in adj.items():
+        qq = qq.replace(i, j)
+    for i, j in params.items():
+        qq = qq.replace(i, j)
+    return qq
+
+
+def looper(file, start_time, end_time):
+    start_point = start_time
+    while start_time < end_time:
+        try:
+            script = replace_all(read_query(file))
+            query = script.format(START_TIME=start_time, STOP_TIME=(start_time + dt.timedelta(days=1)))
+            pc.execute_batch_sql(batch_sql=query)
+            print('success:', str(start_time), ' - ', str(start_time + dt.timedelta(days=1)))
+            start_time += dt.timedelta(days=1)
+        except Exception as e:
+            print('failed to execute - {START_TIME} -- {STOP_TIME}'.format(START_TIME=start_time, STOP_TIME= (start_time + dt.timedelta(
+                days=1))), 'error:' + str(e))
+    print('success:', str(start_point), ' - ', str(end_time - dt.timedelta(days=1)))
+
+
+def main(start, end, file):
+    looper(file=file, start_time=start, end_time=end)
+
+
+if __name__ == '__main__':
+    START_TIME = dt.date(2019, 5, 9)
+    STOP_TIME = dt.date(2019, 5, 11)
+    user = 'georges@wix.com'
+    pc = Looper()
+    main(file='test.sql', start=START_TIME, end=STOP_TIME)
