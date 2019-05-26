@@ -1,0 +1,77 @@
+import logging
+import sqlparse
+from  pyhive import presto
+import time
+from getpass import getuser
+import re
+
+
+class Looper:
+    def __init__(self, host='presto.wixpress.com', port=8181, username=None):
+        self.__host = host
+        self.__port = port
+        self.__username = username if username else getuser() + '@wix.com'
+        self.__rows_limit = 50000
+        self._sql_length_limit = 900000 # max limit is 1,000,000 so leaving 100k as buffer
+        self.__cursor = presto.connect(host=self.__host, port=self.__port, username=self.__username).cursor()
+
+    def script_name(self, sql: str) -> str:
+        table_name = re.search('(?<=exists)[ ]*.*?(?=[ ;\n\r]|$)', sql.lower())
+        action = sql.split(' ', 1)[0]
+        if table_name:
+            return action, table_name.group()
+        else:
+            table_name = sql if action == 'alter' else ' query'
+            return action, table_name
+
+    def execute_sql(self, sql: str):
+        """
+        The methode execute a query
+        :param sql: an sql command to run
+
+        :return: selected data on select statement or number of rows affect on insert/delete
+        """
+        attempt = 0
+        while attempt < 10:
+            try:
+                start = time.time()
+                self.__cursor.execute(sql)
+                done = self.__cursor.fetchone()
+                action, table_name = self.script_name(sql)
+                end = time.time()
+                if done:
+                    print(action + ' table ' + table_name + ' successed in ' + str(round(end-start, 3)) + 'sec')
+                break
+            except Exception as e:
+                print(e)
+                attempt += 1
+                time.sleep(attempt * 60)
+
+    def execute_batch_sql(self, batch_sql: str):
+        """
+        The method executes all sql statements in the batch_sql param, one after another.
+        The sql statements should be separated by ';'. All comments are ignored.
+
+        :param batch_sql: sql script in string format
+        :return on success the method will return a dict {'succeeded': True}.
+                on failure the method will return a dict
+                {'succeeded': False,
+                 'error': <a string containing the error that caused the last sql statement to fail>,
+                 'sqls': <a list of the remaining sql statement that weren't executed yet> }
+        """
+        # removes comments from batch_sql and splits into single sql statements. then removes empty statements
+        sql_statements = list(filter(None, sqlparse.format(batch_sql, strip_comments=True).split(';')))
+
+        # try to execute the sql statements
+        try:
+            while sql_statements:
+                sql = sql_statements[0].strip()
+                if len(sql) > 0:
+                    # logging.debug('SQL statement to execute:\n {}'.format(sql))
+                    self.execute_sql(sql)
+                    # logging.debug('SQL statement completed with the result: \n {}'.format(res))
+                sql_statements.pop(0)
+            return {'succeeded': True}
+        except Exception as e:
+            logging.error('SQL statement failed with the error:\n {}'.format(str(e)))
+            return {'succeeded': False, 'error': str(e), 'sqls': sql_statements}
